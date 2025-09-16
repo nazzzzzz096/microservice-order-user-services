@@ -1,0 +1,216 @@
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - elk-network
+    restart: always
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.0
+    volumes:
+      - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    ports:
+      - "5044:5044"
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk-network
+    restart: always
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - elk-network
+    restart: always
+
+  user_service_1:
+    build:
+      context: ./user_service
+    environment:
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=user-mysql
+      - DB_PORT=3306
+      - DB_NAME=user_service
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - LOG_DIR=/app/logs
+    depends_on:
+      user-mysql:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    expose:
+      - "8000"
+    container_name: user_service_1
+    networks:
+      - elk-network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    restart: always
+
+  user_service_2:
+    build:
+      context: ./user_service
+    environment:
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=user-mysql
+      - DB_PORT=3306
+      - DB_NAME=user_service
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+      - LOG_DIR=/app/logs
+    depends_on:
+      user-mysql:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    expose:
+      - "8000"
+    container_name: user_service_2
+    networks:
+      - elk-network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    restart: always
+
+  order_service_1:
+    build:
+      context: ./order_service
+    environment:
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=order-mysql
+      - DB_PORT=3306
+      - DB_NAME=order_service
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM}
+      - USER_SERVICE_URL=http://nginx:80/users
+      - LOG_DIR=/app/logs
+    depends_on:
+      order-mysql:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    expose:
+      - "8000"
+    container_name: order_service_1
+    networks:
+      - elk-network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    restart: always
+
+  order_service_2:
+    build:
+      context: ./order_service
+    environment:
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=order-mysql
+      - DB_PORT=3306
+      - DB_NAME=order_service
+      - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM}
+      - USER_SERVICE_URL=http://nginx:80/users
+      - LOG_DIR=/app/logs
+    depends_on:
+      order-mysql:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    expose:
+      - "8000"
+    container_name: order_service_2
+    networks:
+      - elk-network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    restart: always
+
+  user-mysql:
+    image: mysql:8.0
+    container_name: user-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=user_service
+    volumes:
+      - user_mysql_data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - elk-network
+    restart: always
+
+  order-mysql:
+    image: mysql:8.0
+    container_name: order-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+      - MYSQL_DATABASE=order_service
+    volumes:
+      - order_mysql_data:/var/lib/mysql
+    ports:
+      - "3308:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - elk-network
+    restart: always
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "8081:80"
+    depends_on:
+      - user_service_1
+      - user_service_2
+      - order_service_1
+      - order_service_2
+    networks:
+      - elk-network
+    restart: always
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.15.0
+    container_name: filebeat
+    user: root
+    volumes:
+      - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logs:/var/log:shared
+    depends_on:
+      - logstash
+    networks:
+      - elk-network
+    restart: always
+
+volumes:
+  es_data:
+  user_mysql_data:
+  order_mysql_data:
+
+networks:
+  elk-network:
+    name: elk-network

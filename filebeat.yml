@@ -1,0 +1,28 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/user_service.log
+    - /var/log/order_service.log
+  json:
+    message_key: message
+    keys_under_root: true
+    overwrite_keys: true
+    add_error_key: true
+
+processors:
+- add_fields:
+    target: ''
+    fields:
+      service: 'microservices'
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
